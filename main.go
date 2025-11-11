@@ -59,6 +59,7 @@ func main() {
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
+	cmds.register("users", handlerUsers)
 
 	// -----------------
 
@@ -74,6 +75,22 @@ func main() {
 	}
 }
 
+func (c *commands) run(s *state, cmd command) error {
+	handler, ok := c.handlers[cmd.Name]
+	if !ok {
+		return fmt.Errorf("unknown command: %s", cmd.Name)
+	}
+	return handler(s, cmd)
+}
+
+func (c *commands) register(name string, f func(*state, command) error) {
+	if c.handlers == nil {
+		c.handlers = make(map[string]func(*state, command) error)
+	}
+	c.handlers[name] = f
+}
+
+// COMMAND HANDLERS
 func handlerLogin(s *state, cmd command) error {
 	name := cmd.Args[0]
 	if len(cmd.Args) == 0 {
@@ -119,17 +136,18 @@ func handlerReset(s *state, cmd command) error {
 	return nil
 }
 
-func (c *commands) run(s *state, cmd command) error {
-	handler, ok := c.handlers[cmd.Name]
-	if !ok {
-		return fmt.Errorf("unknown command: %s", cmd.Name)
+func handlerUsers(s *state, cmd command) error {
+	users, err := s.db.GetUsers(context.Background())
+	if err != nil {
+		return err
 	}
-	return handler(s, cmd)
-}
 
-func (c *commands) register(name string, f func(*state, command) error) {
-	if c.handlers == nil {
-		c.handlers = make(map[string]func(*state, command) error)
+	for _, u := range users {
+		is_current := "(current)"
+		if u.Name != s.cfg.CurrentUserName {
+			is_current = ""
+		}
+		fmt.Printf("* %s %s\n", u.Name, is_current)
 	}
-	c.handlers[name] = f
+	return nil
 }
