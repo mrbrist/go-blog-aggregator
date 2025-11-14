@@ -60,6 +60,12 @@ func main() {
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
+	cmds.register("agg", handlerAgg)
+	cmds.register("addfeed", middlewareLoggedIn(handlerAddFeed))
+	cmds.register("feeds", handlerFeeds)
+	cmds.register("follow", middlewareLoggedIn(handlerFollow))
+	cmds.register("following", middlewareLoggedIn(handlerFollowing))
+	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 
 	// -----------------
 
@@ -90,6 +96,17 @@ func (c *commands) register(name string, f func(*state, command) error) {
 	c.handlers[name] = f
 }
 
+// MIDDLEWARE
+func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
+	return func(s *state, cmd command) error {
+		user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+		if err != nil {
+			return err
+		}
+		return handler(s, cmd, user)
+	}
+}
+
 // COMMAND HANDLERS
 func handlerLogin(s *state, cmd command) error {
 	name := cmd.Args[0]
@@ -114,7 +131,12 @@ func handlerRegister(s *state, cmd command) error {
 	if len(cmd.Args) == 0 {
 		return fmt.Errorf("no name given")
 	}
-	user, err := s.db.CreateUser(context.Background(), database.CreateUserParams{ID: uuid.New(), CreatedAt: time.Now(), UpdatedAt: time.Now(), Name: cmd.Args[0]})
+	user, err := s.db.CreateUser(context.Background(), database.CreateUserParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Name:      cmd.Args[0],
+	})
 	if err != nil {
 		return err
 	}
@@ -149,5 +171,125 @@ func handlerUsers(s *state, cmd command) error {
 		}
 		fmt.Printf("* %s %s\n", u.Name, is_current)
 	}
+	return nil
+}
+
+func handlerAgg(s *state, cmd command) error {
+	feed, err := fetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(feed)
+	return nil
+}
+
+func handlerAddFeed(s *state, cmd command, user database.User) error {
+	if len(cmd.Args) < 2 {
+		return fmt.Errorf("this command requires a name and a url for the feed")
+	}
+
+	feed, err := s.db.AddFeed(context.Background(), database.AddFeedParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Name:      cmd.Args[0],
+		Url:       cmd.Args[1],
+		UserID:    user.ID,
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err1 := s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+	})
+	if err1 != nil {
+		return err1
+	}
+
+	fmt.Println(feed)
+	return nil
+}
+
+func handlerFeeds(s *state, cmd command) error {
+	feeds, err := s.db.GetFeeds(context.Background())
+	if err != nil {
+		return err
+	}
+
+	for _, f := range feeds {
+		user, err := s.db.GetUserByID(context.Background(), f.UserID)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("* %s (%s) <%s>\n", f.Name, f.Url, user.Name)
+	}
+
+	return nil
+}
+
+func handlerFollow(s *state, cmd command, user database.User) error {
+	if len(cmd.Args) == 0 {
+		return fmt.Errorf("no url given")
+	}
+	url := cmd.Args[0]
+
+	feed, err := s.db.GetFeedByURL(context.Background(), url)
+	if err != nil {
+		return err
+	}
+
+	data, err := s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%s <%s>\n", data.FeedName, data.UserName)
+
+	return nil
+}
+
+func handlerFollowing(s *state, cmd command, user database.User) error {
+	feeds, err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Feeds for user: %s\n", user.Name)
+
+	for _, f := range feeds {
+		fmt.Printf("* %s (%s)\n", f.FeedName, f.FeedUrl)
+	}
+
+	return nil
+}
+
+func handlerUnfollow(s *state, cmd command, user database.User) error {
+	if len(cmd.Args) == 0 {
+		return fmt.Errorf("no url given")
+	}
+
+	feed, err := s.db.GetFeedByURL(context.Background(), cmd.Args[0])
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.UnfollowFeed(context.Background(), database.UnfollowFeedParams{FeedID: feed.ID, UserID: user.ID})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Unfollowed feed '%s' for user: %s", feed.Name, user.Name)
 	return nil
 }
