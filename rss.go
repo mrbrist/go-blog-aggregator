@@ -9,6 +9,11 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/mrbrist/go-blog-aggregator/internal/database"
 )
 
 type RSSFeed struct {
@@ -87,6 +92,30 @@ func scrapeFeeds(s *state) {
 	}
 
 	for _, i := range feed.Channel.Item {
-		fmt.Println(i.Title)
+		pubTime, err := time.Parse(time.RFC1123Z, i.PubDate)
+		if err != nil {
+			return
+		}
+		post, err := s.db.CreatePost(context.Background(), database.CreatePostParams{
+			ID:          uuid.New(),
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+			Title:       i.Title,
+			Url:         i.Link,
+			Description: i.Description,
+			PublishedAt: pubTime,
+			FeedID:      next.ID,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "unique") ||
+				strings.Contains(err.Error(), "duplicate") {
+				continue
+			}
+
+			// Log all other errors
+			fmt.Printf("error saving post %q: %v\n", i.Title, err)
+			continue
+		}
+		fmt.Printf("Saved post: %s\n", post.Title)
 	}
 }

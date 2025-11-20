@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -66,6 +67,7 @@ func main() {
 	cmds.register("follow", middlewareLoggedIn(handlerFollow))
 	cmds.register("following", middlewareLoggedIn(handlerFollowing))
 	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
+	cmds.register("browse", middlewareLoggedIn(handlerBrowse))
 
 	// -----------------
 
@@ -295,5 +297,27 @@ func handlerUnfollow(s *state, cmd command, user database.User) error {
 	}
 
 	fmt.Printf("Unfollowed feed '%s' for user: %s", feed.Name, user.Name)
+	return nil
+}
+
+func handlerBrowse(s *state, cmd command, user database.User) error {
+	var limit int32 = 2
+	if len(cmd.Args) > 0 {
+		i, err := strconv.ParseInt(cmd.Args[0], 10, 32)
+		if err != nil {
+			return err
+		}
+		limit = int32(i)
+	}
+	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  limit,
+	})
+	if err != nil {
+		return err
+	}
+	for _, p := range posts {
+		fmt.Printf("* %s (%s)\n", p.Title, p.Url)
+	}
 	return nil
 }
